@@ -1,4 +1,6 @@
-# Install and load required packages
+MAX_PRICE_PER_M2 <- 10000
+MAX_LAND_AREA_M2 <- 2000
+
 install_and_load <- function(packages) {
   for (pkg in packages) {
     if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
@@ -58,8 +60,8 @@ preprocess <- function(df) {
       !is.na(land_area_m2),
       price_per_m2 > 0,
       land_area_m2 > 0,
-      price_per_m2 < 10000,  # 排除異常高價
-      land_area_m2 < 2000    # 排除異常大面積
+      price_per_m2 < MAX_PRICE_PER_M2,
+      land_area_m2 < MAX_LAND_AREA_M2
     )
   
   # 標準化文字欄位
