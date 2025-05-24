@@ -39,7 +39,7 @@ server <- function(input, output, session) {
     return(df)
   })
   
-  # 更新篩選選項
+  # 更新篩選選項 - 使用完整資料
   observe({
     df <- data()
     
@@ -50,15 +50,52 @@ server <- function(input, output, session) {
     updateSelectInput(session, "building_type_filter", 
                      choices = sort(unique(df$building_type)),
                      selected = NULL)
+  })
+  
+  # 更新功能特定選項 - 使用篩選後資料
+  observe({
+    df <- filtered_data()
     
-    updateSelectInput(session, "pred_district",
-                     choices = sort(unique(df$district)))
+    # 檢查資料是否足夠
+    has_sufficient_data <- nrow(df) >= 5
     
-    updateSelectInput(session, "pred_building_type",
-                     choices = sort(unique(df$building_type)))
+    if (has_sufficient_data) {
+      available_districts <- sort(unique(df$district))
+      available_building_types <- sort(unique(df$building_type))
+      
+      updateSelectInput(session, "pred_district",
+                       choices = available_districts,
+                       selected = if(length(available_districts) > 0) available_districts[1] else NULL)
+      
+      updateSelectInput(session, "pred_building_type",
+                       choices = available_building_types,
+                       selected = if(length(available_building_types) > 0) available_building_types[1] else NULL)
+      
+      updateSelectInput(session, "desired_building_type",
+                       choices = c("不限" = "", available_building_types))
+    } else {
+      # 資料不足時的處理
+      updateSelectInput(session, "pred_district", choices = character(0))
+      updateSelectInput(session, "pred_building_type", choices = character(0))
+      updateSelectInput(session, "desired_building_type", choices = c("不限" = ""))
+    }
+  })
+  
+  # 資料狀態反應式值
+  data_status <- reactive({
+    df <- filtered_data()
+    n_records <- nrow(df)
+    n_districts <- length(unique(df$district))
+    n_building_types <- length(unique(df$building_type))
     
-    updateSelectInput(session, "desired_building_type",
-                     choices = c("不限" = "", sort(unique(df$building_type))))
+    list(
+      total_records = n_records,
+      districts_count = n_districts,
+      building_types_count = n_building_types,
+      sufficient_for_prediction = n_records >= 10 && n_districts >= 2 && n_building_types >= 2,
+      sufficient_for_recommendation = n_records >= 3,
+      sufficient_for_analysis = n_records >= 1
+    )
   })
   
   # 重置篩選
@@ -282,8 +319,16 @@ server <- function(input, output, session) {
   
   output$model_summary <- renderPrint({
     model <- rental_model()
+    status <- data_status()
     if(is.null(model)) {
-      cat("模型無法建立：資料不足或篩選條件過於嚴格")
+      if(!status$sufficient_for_prediction) {
+        cat("模型無法建立：資料不足（需要至少10筆記錄、2個行政區、2種建物型態）")
+        cat("\n目前資料：", status$total_records, "筆記錄，", 
+            status$districts_count, "個行政區，", 
+            status$building_types_count, "種建物型態")
+      } else {
+        cat("模型無法建立：其他錯誤")
+      }
     } else {
       summary(model)
     }
@@ -293,9 +338,23 @@ server <- function(input, output, session) {
   
   predicted_price <- eventReactive(input$predict_btn, {
     model <- rental_model()
+    status <- data_status()
     
     if(is.null(model)) {
-      return("無法預測")
+      if(!status$sufficient_for_prediction) {
+        return("資料不足：請調整篩選條件以獲得更多資料")
+      }
+      return("無法預測：模型建立失敗")
+    }
+    
+    # 檢查輸入是否在可用選項中
+    df <- filtered_data()
+    if(!(input$pred_district %in% df$district)) {
+      return("所選行政區在目前篩選條件下無資料")
+    }
+    
+    if(!(input$pred_building_type %in% df$building_type)) {
+      return("所選建物型態在目前篩選條件下無資料")
     }
     
     tryCatch({
@@ -309,7 +368,7 @@ server <- function(input, output, session) {
       prediction <- predict(model, new_data)
       round(prediction, 0)
     }, error = function(e) {
-      "預測失敗"
+      paste("預測失敗：", e$message)
     })
   })
   
@@ -324,14 +383,24 @@ server <- function(input, output, session) {
   
   output$model_performance <- renderPrint({
     model <- rental_model()
+    status <- data_status()
     
     if(is.null(model)) {
-      cat("模型無法建立：資料不足或篩選條件過於嚴格")
+      if(!status$sufficient_for_prediction) {
+        cat("模型無法建立：資料不足\n")
+        cat("需要：至少10筆記錄、2個行政區、2種建物型態\n")
+        cat("目前：", status$total_records, "筆記錄，", 
+            status$districts_count, "個行政區，", 
+            status$building_types_count, "種建物型態")
+      } else {
+        cat("模型無法建立：其他錯誤")
+      }
     } else {
       cat("R-squared:", round(summary(model)$r.squared, 3), "\n")
       cat("Adjusted R-squared:", round(summary(model)$adj.r.squared, 3), "\n")
       cat("RMSE:", round(sqrt(mean(model$residuals^2)), 2), "\n")
-      cat("樣本數:", nrow(model$model))
+      cat("樣本數:", nrow(model$model), "\n")
+      cat("模型變數:", paste(names(model$coefficients), collapse = ", "))
     }
   })
   
@@ -339,8 +408,15 @@ server <- function(input, output, session) {
     model <- rental_model()
     
     if(is.null(model)) {
+      status <- data_status()
+      message <- if(!status$sufficient_for_prediction) {
+        paste("資料不足\n需要更多資料建立模型\n目前：", status$total_records, "筆記錄")
+      } else {
+        "模型無法建立"
+      }
+      
       p <- ggplot() + 
-        annotate("text", x = 0.5, y = 0.5, label = "模型無法建立", size = 6) +
+        annotate("text", x = 0.5, y = 0.5, label = message, size = 4) +
         theme_void()
       return(ggplotly(p) %>% config(displayModeBar = FALSE))
     }
@@ -363,6 +439,13 @@ server <- function(input, output, session) {
   
   recommendation_result <- eventReactive(input$recommend_btn, {
     df <- filtered_data()
+    status <- data_status()
+    
+    if(!status$sufficient_for_recommendation) {
+      return(data.frame(
+        訊息 = "資料不足：請調整篩選條件以獲得更多資料（至少需要3筆記錄）"
+      ))
+    }
     
     # 計算預估月租 = 單價 * 面積
     df$estimated_monthly_rent <- df$price_per_m2 * input$desired_area
@@ -371,9 +454,21 @@ server <- function(input, output, session) {
     suitable <- df %>%
       filter(estimated_monthly_rent <= input$budget)
     
+    if(nrow(suitable) == 0) {
+      return(data.frame(
+        訊息 = paste("沒有符合預算", input$budget, "元的物件，請提高預算或調整篩選條件")
+      ))
+    }
+    
     # 如果有指定建物型態偏好
     if (!is.null(input$desired_building_type) && input$desired_building_type != "") {
       suitable <- suitable %>% filter(building_type == input$desired_building_type)
+      
+      if(nrow(suitable) == 0) {
+        return(data.frame(
+          訊息 = paste("沒有符合預算和建物型態偏好的物件")
+        ))
+      }
     }
     
     # 按行政區彙總推薦
@@ -396,15 +491,32 @@ server <- function(input, output, session) {
   })
   
   output$recommendation_table <- renderDT({
-    datatable(
-      recommendation_result(),
-      options = list(
-        pageLength = 10,
-        language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Chinese-traditional.json')
-      ),
-      class = 'cell-border stripe'
-    ) %>%
-      formatCurrency(c("平均單價", "預估月租"), currency = "", interval = 3, mark = ",", digits = 0)
+    result <- recommendation_result()
+    
+    if("訊息" %in% names(result)) {
+      # 顯示錯誤或提示訊息
+      datatable(
+        result,
+        options = list(
+          pageLength = 5,
+          searching = FALSE,
+          paging = FALSE,
+          info = FALSE
+        ),
+        class = 'cell-border stripe'
+      )
+    } else {
+      # 正常的推薦結果
+      datatable(
+        result,
+        options = list(
+          pageLength = 10,
+          language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Chinese-traditional.json')
+        ),
+        class = 'cell-border stripe'
+      ) %>%
+        formatCurrency(c("平均單價", "預估月租"), currency = "", interval = 3, mark = ",", digits = 0)
+    }
   })
   
   # === 互動地圖頁面 ===

@@ -22,6 +22,8 @@ sidebar <- dashboardSidebar(
   hr(),
   
   h4("篩選條件", style = "color: white; margin-left: 15px;"),
+  p("注意：篩選條件會影響所有功能的可用選項", 
+    style = "color: #cccccc; margin-left: 15px; font-size: 12px; margin-bottom: 10px;"),
   
   selectInput(
     "district_filter",
@@ -101,6 +103,29 @@ body <- dashboardBody(
       }
       .nav-tabs-custom > .nav-tabs > li.active {
         border-top-color: #3c8dbc;
+      }
+      .data-status {
+        background-color: #f0f0f0;
+        padding: 8px;
+        margin: 5px 0;
+        border-radius: 4px;
+        font-size: 11px;
+        color: #666;
+      }
+      .status-sufficient {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+      .status-warning {
+        background-color: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+      }
+      .status-error {
+        background-color: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
       }
     "))
   ),
@@ -197,6 +222,16 @@ body <- dashboardBody(
       tabItem(
         tabName = "prediction",
         fluidRow(
+          div(class = "col-md-12",
+            div(class = "alert alert-info",
+              icon("info-circle"), 
+              strong(" 使用說明："), 
+              "預測功能會根據目前的篩選條件動態調整可用選項。如果選項較少，請調整左側篩選條件以獲得更多資料。"
+            )
+          )
+        ),
+        
+        fluidRow(
           box(
             title = "租金預測器", 
             status = "primary", 
@@ -204,7 +239,11 @@ body <- dashboardBody(
             width = 6,
             
             selectInput("pred_district", "選擇行政區:", choices = NULL),
+            div(id = "district_status", class = "data-status"),
+            
             selectInput("pred_building_type", "選擇建物型態:", choices = NULL),
+            div(id = "building_type_status", class = "data-status"),
+            
             numericInput("pred_area", "土地面積 (㎡):", value = 50, min = 1, max = 1000),
             selectInput("pred_floor", "選擇樓層:", 
                        choices = c("一層", "二層", "三層", "四層", "五層", "全", "地下層")),
@@ -244,6 +283,16 @@ body <- dashboardBody(
       tabItem(
         tabName = "recommendation",
         fluidRow(
+          div(class = "col-md-12",
+            div(class = "alert alert-info",
+              icon("info-circle"), 
+              strong(" 使用說明："), 
+              "推薦功能會在目前篩選條件範圍內尋找符合預算的物件。建議先調整篩選條件以縮小搜尋範圍。"
+            )
+          )
+        ),
+        
+        fluidRow(
           box(
             title = "預算推薦器", 
             status = "primary", 
@@ -257,7 +306,11 @@ body <- dashboardBody(
             br(),
             actionButton("recommend_btn", "尋找推薦", 
                         icon = icon("search"), 
-                        class = "btn-success btn-lg")
+                        class = "btn-success btn-lg"),
+            
+            br(), br(),
+            div(id = "recommendation_status", class = "data-status",
+                "點擊「尋找推薦」開始搜尋...")
           ),
           
           box(
@@ -280,6 +333,9 @@ body <- dashboardBody(
             status = "primary", 
             solidHeader = TRUE,
             width = 12,
+            
+            p(class = "text-muted", 
+              "顯示根據左側篩選條件過濾後的資料。資料會即時更新。"),
             
             DT::dataTableOutput("raw_data_table")
           )
