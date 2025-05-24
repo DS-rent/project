@@ -69,6 +69,24 @@ sidebar <- dashboardSidebar(
   )
 )
 
+interactive_map_tab <- if(leaflet_available) {
+  list(tabItem(
+    tabName = "map",
+    fluidRow(
+      box(
+        title = "台北市租金熱點地圖", 
+        status = "primary", 
+        solidHeader = TRUE,
+        width = 12,
+        
+        leafletOutput("rental_map", height = "600px")
+      )
+    )
+  ))
+} else {
+  list()
+}
+
 body <- dashboardBody(
   tags$head(
     tags$style(HTML("
@@ -269,24 +287,7 @@ body <- dashboardBody(
       )
     ),
     
-    # 互動地圖頁面 (conditional)
-    if(leaflet_available) {
-      list(tabItem(
-        tabName = "map",
-        fluidRow(
-          box(
-            title = "台北市租金熱點地圖", 
-            status = "primary", 
-            solidHeader = TRUE,
-            width = 12,
-            
-            leafletOutput("rental_map", height = "600px")
-          )
-        )
-      ))
-    } else {
-      list()
-    }
+    interactive_map_tab
   ))
 )
 

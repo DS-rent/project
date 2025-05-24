@@ -15,24 +15,19 @@ install_and_load <- function(packages) {
 core_packages <- c("shiny", "shinydashboard", "ggplot2", "dplyr", "plotly", "DT")
 install_and_load(core_packages)
 
-# Optional packages - only try once and fail silently
-if (!require("leaflet", character.only = TRUE, quietly = TRUE)) {
-  tryCatch({
-    suppressWarnings(install.packages("leaflet", repos = "https://cran.rstudio.com/", dependencies = TRUE, quiet = TRUE))
-    suppressMessages(require("leaflet", character.only = TRUE, quietly = TRUE))
-  }, error = function(e) {
-    # Fail silently - leaflet is optional
-  })
+install_optional_package <- function(pkg) {
+  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    tryCatch({
+      suppressWarnings(install.packages(pkg, repos = "https://cran.rstudio.com/", dependencies = TRUE, quiet = TRUE))
+      suppressMessages(require(pkg, character.only = TRUE, quietly = TRUE))
+    }, error = function(e) {
+      
+    })
+  }
 }
 
-if (!require("lubridate", character.only = TRUE, quietly = TRUE)) {
-  tryCatch({
-    suppressWarnings(install.packages("lubridate", repos = "https://cran.rstudio.com/", dependencies = TRUE, quiet = TRUE))
-    suppressMessages(require("lubridate", character.only = TRUE, quietly = TRUE))
-  }, error = function(e) {
-    # Fail silently - lubridate is optional
-  })
-}
+install_optional_package("leaflet")
+install_optional_package("lubridate")
 
 preprocess <- function(df) {
   df <- df %>%
