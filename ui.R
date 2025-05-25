@@ -43,21 +43,21 @@ sidebar <- dashboardSidebar(
   
   sliderInput(
     "price_range",
-    "租金單價範圍 (元/㎡):",
+    "租金單價範圍 (元/坪):",
     min = 0,
-    max = 5000,
-    value = c(0, 2000),
-    step = 50,
+    max = 16500,
+    value = c(0, 6600),
+    step = 165,
     width = "90%"
   ),
   
   sliderInput(
     "area_range", 
-    "面積範圍 (㎡):",
+    "面積範圍 (坪):",
     min = 0,
-    max = 500,
-    value = c(0, 200),
-    step = 10,
+    max = 151,
+    value = c(0, 60),
+    step = 3,
     width = "90%"
   ),
   
@@ -244,7 +244,7 @@ body <- dashboardBody(
             selectInput("pred_building_type", "選擇建物型態:", choices = NULL),
             div(id = "building_type_status", class = "data-status"),
             
-            numericInput("pred_area", "土地面積 (㎡):", value = 50, min = 1, max = 1000),
+            numericInput("pred_area", "土地面積 (坪):", value = 15, min = 0.3, max = 303),
             selectInput("pred_floor", "選擇樓層:", 
                        choices = c("一層", "二層", "三層", "四層", "五層", "全", "地下層")),
             
@@ -258,7 +258,7 @@ body <- dashboardBody(
             div(id = "prediction_result",
                 h4("預測結果:", style = "color: #3c8dbc;"),
                 h2(textOutput("predicted_price"), style = "color: #00a65a;"),
-                p("元/平方公尺", style = "color: #666;")
+                p("元/坪", style = "color: #666;")
             )
           ),
           
@@ -300,7 +300,7 @@ body <- dashboardBody(
             width = 4,
             
             numericInput("budget", "月租預算 (元):", value = 20000, min = 5000, max = 100000, step = 1000),
-            numericInput("desired_area", "期望面積 (㎡):", value = 30, min = 10, max = 200),
+            numericInput("desired_area", "期望面積 (坪):", value = 9, min = 3, max = 61),
             selectInput("desired_building_type", "偏好建物型態:", choices = NULL),
             
             br(),

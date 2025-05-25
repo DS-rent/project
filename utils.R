@@ -1,5 +1,9 @@
-MAX_PRICE_PER_M2 <- 10000
-MAX_LAND_AREA_M2 <- 2000
+# Conversion factor: 1 坪 = 3.3058 m²
+M2_TO_PING <- 1 / 3.3058
+PING_TO_M2 <- 3.3058
+
+MAX_PRICE_PER_PING <- 10000 * PING_TO_M2  # ~33,058 元/坪
+MAX_LAND_AREA_PING <- 2000 * M2_TO_PING   # ~605 坪
 
 install_and_load <- function(packages) {
   for (pkg in packages) {
@@ -53,15 +57,22 @@ preprocess <- function(df) {
   df$land_area_m2 <- as.numeric(gsub("[^0-9.]", "", as.character(df$land_area_m2)))
   df$price_per_m2 <- as.numeric(gsub("[^0-9.]", "", as.character(df$price_per_m2)))
   
-  # 移除異常值
+  # 移除異常值 (使用原始m²單位進行篩選以保持與原始資料的兼容性)
   df <- df %>%
     filter(
       !is.na(price_per_m2),
       !is.na(land_area_m2),
       price_per_m2 > 0,
       land_area_m2 > 0,
-      price_per_m2 < MAX_PRICE_PER_M2,
-      land_area_m2 < MAX_LAND_AREA_M2
+      price_per_m2 < 10000,  # 原始閾值
+      land_area_m2 < 2000    # 原始閾值
+    )
+  
+  # 轉換為坪單位
+  df <- df %>%
+    mutate(
+      land_area_ping = land_area_m2 * M2_TO_PING,
+      price_per_ping = price_per_m2 * PING_TO_M2
     )
   
   # 標準化文字欄位

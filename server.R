@@ -18,13 +18,13 @@ server <- function(input, output, session) {
   filtered_data <- reactive({
     df <- data()
     
-    # 價格範圍篩選
+    # 價格範圍篩選 (使用坪單價)
     df <- df %>% 
-      filter(price_per_m2 >= input$price_range[1] & price_per_m2 <= input$price_range[2])
+      filter(price_per_ping >= input$price_range[1] & price_per_ping <= input$price_range[2])
     
-    # 面積範圍篩選  
+    # 面積範圍篩選 (使用坪面積)
     df <- df %>%
-      filter(land_area_m2 >= input$area_range[1] & land_area_m2 <= input$area_range[2])
+      filter(land_area_ping >= input$area_range[1] & land_area_ping <= input$area_range[2])
     
     # 行政區篩選
     if (!is.null(input$district_filter) && length(input$district_filter) > 0) {
@@ -102,8 +102,8 @@ server <- function(input, output, session) {
   observeEvent(input$reset_filters, {
     updateSelectInput(session, "district_filter", selected = character(0))
     updateSelectInput(session, "building_type_filter", selected = character(0))
-    updateSliderInput(session, "price_range", value = c(0, 2000))
-    updateSliderInput(session, "area_range", value = c(0, 200))
+    updateSliderInput(session, "price_range", value = c(0, 6600))
+    updateSliderInput(session, "area_range", value = c(0, 60))
   })
   
   # === 市場總覽頁面 ===
@@ -119,9 +119,9 @@ server <- function(input, output, session) {
   })
   
   output$avg_price <- renderValueBox({
-    avg_price <- round(mean(filtered_data()$price_per_m2, na.rm = TRUE), 0)
+    avg_price <- round(mean(filtered_data()$price_per_ping, na.rm = TRUE), 0)
     valueBox(
-      value = paste(avg_price, "元/㎡"),
+      value = paste(avg_price, "元/坪"),
       subtitle = "平均租金",
       icon = icon("dollar-sign"),
       color = "green"
@@ -129,9 +129,9 @@ server <- function(input, output, session) {
   })
   
   output$median_price <- renderValueBox({
-    median_price <- round(median(filtered_data()$price_per_m2, na.rm = TRUE), 0)
+    median_price <- round(median(filtered_data()$price_per_ping, na.rm = TRUE), 0)
     valueBox(
-      value = paste(median_price, "元/㎡"),
+      value = paste(median_price, "元/坪"),
       subtitle = "租金中位數",
       icon = icon("chart-line"),
       color = "yellow"
@@ -160,9 +160,9 @@ server <- function(input, output, session) {
   output$price_dist_plot <- renderPlotly({
     df <- filtered_data()
     
-    p <- ggplot(df, aes(x = price_per_m2)) +
-      geom_histogram(binwidth = 50, fill = "#3498db", alpha = 0.7, color = "white") +
-      labs(title = "租金單價分布", x = "租金 (元/㎡)", y = "物件數量") +
+    p <- ggplot(df, aes(x = price_per_ping)) +
+      geom_histogram(binwidth = 165, fill = "#3498db", alpha = 0.7, color = "white") +
+      labs(title = "租金單價分布", x = "租金 (元/坪)", y = "物件數量") +
       theme_minimal()
     
     ggplotly(p) %>% config(displayModeBar = FALSE)
@@ -172,13 +172,13 @@ server <- function(input, output, session) {
   output$district_avg_plot <- renderPlotly({
     df <- filtered_data() %>%
       group_by(district) %>%
-      summarise(avg_price = mean(price_per_m2, na.rm = TRUE), .groups = 'drop') %>%
+      summarise(avg_price = mean(price_per_ping, na.rm = TRUE), .groups = 'drop') %>%
       arrange(desc(avg_price))
     
     p <- ggplot(df, aes(x = reorder(district, avg_price), y = avg_price)) +
       geom_col(fill = "#2ecc71", alpha = 0.8) +
       coord_flip() +
-      labs(title = "各行政區平均租金", x = "行政區", y = "平均租金 (元/㎡)") +
+      labs(title = "各行政區平均租金", x = "行政區", y = "平均租金 (元/坪)") +
       theme_minimal()
     
     ggplotly(p) %>% config(displayModeBar = FALSE)
@@ -208,10 +208,10 @@ server <- function(input, output, session) {
     df <- filtered_data()
     
     p <- suppressMessages({
-      ggplot(df, aes(x = land_area_m2, y = price_per_m2, color = district)) +
+      ggplot(df, aes(x = land_area_ping, y = price_per_ping, color = district)) +
         geom_point(alpha = 0.6) +
         geom_smooth(method = "lm", se = FALSE, color = "red") +
-        labs(title = "面積 vs 租金關係", x = "土地面積 (㎡)", y = "租金 (元/㎡)") +
+        labs(title = "面積 vs 租金關係", x = "土地面積 (坪)", y = "租金 (元/坪)") +
         theme_minimal() +
         theme(legend.position = "none")
     })
@@ -225,10 +225,10 @@ server <- function(input, output, session) {
   output$price_boxplot <- renderPlotly({
     df <- filtered_data()
     
-    p <- ggplot(df, aes(x = reorder(district, price_per_m2, median), y = price_per_m2)) +
+    p <- ggplot(df, aes(x = reorder(district, price_per_ping, median), y = price_per_ping)) +
       geom_boxplot(fill = "#3498db", alpha = 0.7) +
       coord_flip() +
-      labs(title = "各行政區租金分布", x = "行政區", y = "租金 (元/㎡)") +
+      labs(title = "各行政區租金分布", x = "行政區", y = "租金 (元/坪)") +
       theme_minimal()
     
     ggplotly(p) %>% config(displayModeBar = FALSE)
@@ -238,13 +238,13 @@ server <- function(input, output, session) {
   output$floor_analysis <- renderPlotly({
     df <- filtered_data() %>%
       group_by(floor) %>%
-      summarise(avg_price = mean(price_per_m2, na.rm = TRUE), count = n(), .groups = 'drop') %>%
+      summarise(avg_price = mean(price_per_ping, na.rm = TRUE), count = n(), .groups = 'drop') %>%
       filter(count >= 3)
     
     p <- ggplot(df, aes(x = reorder(floor, avg_price), y = avg_price)) +
       geom_col(fill = "#9b59b6", alpha = 0.8) +
       coord_flip() +
-      labs(title = "樓層 vs 平均租金", x = "樓層", y = "平均租金 (元/㎡)") +
+      labs(title = "樓層 vs 平均租金", x = "樓層", y = "平均租金 (元/坪)") +
       theme_minimal()
     
     ggplotly(p) %>% config(displayModeBar = FALSE)
@@ -258,25 +258,25 @@ server <- function(input, output, session) {
       df <- df %>%
         mutate(year_month = format(rent_date, "%Y-%m")) %>%
         group_by(year_month) %>%
-        summarise(avg_price = mean(price_per_m2, na.rm = TRUE), .groups = 'drop')
+        summarise(avg_price = mean(price_per_ping, na.rm = TRUE), .groups = 'drop')
       
       p <- ggplot(df, aes(x = year_month, y = avg_price)) +
         geom_line(group = 1, color = "#e74c3c", linewidth = 1) +
         geom_point(color = "#e74c3c", size = 2) +
-        labs(title = "租金時間趨勢", x = "年月", y = "平均租金 (元/㎡)") +
+        labs(title = "租金時間趨勢", x = "年月", y = "平均租金 (元/坪)") +
         theme_minimal() +
         theme(axis.text.x = element_text(angle = 45, hjust = 1))
     } else {
       # Fallback: simple district comparison
       df <- df %>%
         group_by(district) %>%
-        summarise(avg_price = mean(price_per_m2, na.rm = TRUE), .groups = 'drop') %>%
+        summarise(avg_price = mean(price_per_ping, na.rm = TRUE), .groups = 'drop') %>%
         slice_head(n = 10)
       
       p <- ggplot(df, aes(x = reorder(district, avg_price), y = avg_price)) +
         geom_col(fill = "#e74c3c", alpha = 0.8) +
         coord_flip() +
-        labs(title = "前10區域平均租金", x = "行政區", y = "平均租金 (元/㎡)") +
+        labs(title = "前10區域平均租金", x = "行政區", y = "平均租金 (元/坪)") +
         theme_minimal()
     }
     
@@ -359,14 +359,15 @@ server <- function(input, output, session) {
     
     tryCatch({
       new_data <- data.frame(
-        land_area_m2 = input$pred_area,
+        land_area_m2 = input$pred_area * PING_TO_M2,
         district = input$pred_district,
         building_type = input$pred_building_type,
         floor = input$pred_floor
       )
       
       prediction <- predict(model, new_data)
-      round(prediction, 0)
+      prediction_ping <- prediction * PING_TO_M2
+      round(prediction_ping, 0)
     }, error = function(e) {
       paste("預測失敗：", e$message)
     })
@@ -377,7 +378,7 @@ server <- function(input, output, session) {
     if(is.character(result)) {
       result
     } else {
-      paste(result, "元/㎡")
+      paste(result, "元/坪")
     }
   })
   
@@ -447,8 +448,8 @@ server <- function(input, output, session) {
       ))
     }
     
-    # 計算預估月租 = 單價 * 面積
-    df$estimated_monthly_rent <- df$price_per_m2 * input$desired_area
+    # 計算預估月租 = 單價 * 面積 (轉換坪到m²)
+    df$estimated_monthly_rent <- df$price_per_ping * input$desired_area
     
     # 篩選符合預算的物件
     suitable <- df %>%
@@ -476,9 +477,9 @@ server <- function(input, output, session) {
       group_by(district, building_type) %>%
       summarise(
         物件數量 = n(),
-        平均單價 = round(mean(price_per_m2), 0),
+        `平均單價 (元/坪)` = round(mean(price_per_ping), 0),
         預估月租 = round(mean(estimated_monthly_rent), 0),
-        平均面積 = round(mean(land_area_m2), 1),
+        `平均面積 (坪)` = round(mean(land_area_ping), 1),
         .groups = 'drop'
       ) %>%
       arrange(預估月租) %>%
@@ -515,7 +516,7 @@ server <- function(input, output, session) {
         ),
         class = 'cell-border stripe'
       ) %>%
-        formatCurrency(c("平均單價", "預估月租"), currency = "", interval = 3, mark = ",", digits = 0)
+        formatCurrency(c("平均單價 (元/坪)", "預估月租"), currency = "", interval = 3, mark = ",", digits = 0)
     }
   })
   
@@ -526,7 +527,7 @@ server <- function(input, output, session) {
       df <- filtered_data() %>%
         group_by(district) %>%
         summarise(
-          avg_price = mean(price_per_m2, na.rm = TRUE),
+          avg_price = mean(price_per_ping, na.rm = TRUE),
           count = n(),
           .groups = 'drop'
         )
@@ -556,7 +557,7 @@ server <- function(input, output, session) {
           fillOpacity = 0.7,
           popup = ~paste0(
             "<b>", district, "</b><br/>",
-            "平均租金: ", round(avg_price, 0), " 元/㎡<br/>",
+            "平均租金: ", round(avg_price, 0), " 元/坪<br/>",
             "物件數量: ", count
           )
         ) %>%
@@ -564,7 +565,7 @@ server <- function(input, output, session) {
           "bottomright",
           pal = colorNumeric("YlOrRd", map_data$avg_price),
           values = ~avg_price,
-          title = "平均租金<br/>(元/㎡)",
+          title = "平均租金<br/>(元/坪)",
           opacity = 1
         )
     })
@@ -574,14 +575,14 @@ server <- function(input, output, session) {
   
   output$raw_data_table <- renderDT({
     df <- filtered_data() %>%
-      select(district, land_area_m2, rent_date, floor, building_type, price_per_m2) %>%
+      select(district, land_area_ping, rent_date, floor, building_type, price_per_ping) %>%
       rename(
         行政區 = district,
-        土地面積 = land_area_m2,
+        `土地面積 (坪)` = land_area_ping,
         租賃日期 = rent_date,
         樓層 = floor,
         建物型態 = building_type,
-        單價 = price_per_m2
+        `單價 (元/坪)` = price_per_ping
       )
     
     datatable(
@@ -593,7 +594,7 @@ server <- function(input, output, session) {
       ),
       class = 'cell-border stripe'
     ) %>%
-      formatCurrency("單價", currency = "", interval = 3, mark = ",", digits = 0) %>%
-      formatRound("土地面積", digits = 2)
+      formatCurrency("單價 (元/坪)", currency = "", interval = 3, mark = ",", digits = 0) %>%
+      formatRound("土地面積 (坪)", digits = 2)
   })
 }
