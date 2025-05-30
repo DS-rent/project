@@ -1,5 +1,7 @@
 source("utils.R")
-
+library(caret)
+library(caretEnsemble)
+library(glmnet)
 # Check package availability
 leaflet_available <- "leaflet" %in% rownames(installed.packages()) && 
                      require("leaflet", character.only = TRUE, quietly = TRUE)
@@ -10,7 +12,7 @@ server <- function(input, output, session) {
   
   # 載入並處理資料
   data <- reactive({
-    df <- read.csv("data/MOI_rent.csv", fileEncoding = "UTF-8-BOM")
+    df <- read.csv("datasets.csv", fileEncoding = "UTF-8-BOM")
     preprocess(df)
   })
   
@@ -285,54 +287,72 @@ server <- function(input, output, session) {
   
   # 迴歸模型
   rental_model <- reactive({
-    df <- filtered_data()
+  df <- filtered_data()
+  
+  # 基本資料條件檢查
+  if (nrow(df) < 10) return(NULL)
+
+  # 特徵前處理（選用較穩定欄位）
+  df <- df %>% 
+    select(price_per_m2, land_area_m2, district, building_type, floor) %>% 
+    filter(!is.na(price_per_m2), !is.na(land_area_m2), !is.na(district), 
+           !is.na(building_type), !is.na(floor))
+  
+  # 訓練參數
+  ctrl <- trainControl(
+    method = "cv", 
+    number = 5, 
+    savePredictions = "final",
+    classProbs = FALSE,
+    verboseIter = FALSE
+  )
+  
+  tryCatch({
+    # Base learners：線性回歸 + 隨機森林 + k近鄰
+    models <- caretList(
+      price_per_m2 ~ land_area_m2 + district + building_type + floor,
+      data = df,
+      trControl = ctrl,
+      methodList = c("lm", "rf", "knn")
+    )
     
-    # Check if we have enough data
-    if(nrow(df) < 10) {
-      return(NULL)
-    }
+    # 使用 glmnet（彈性正則化）作為 meta learner
+    stack_model <- caretStack(
+      models,
+      method = "glmnet",
+      trControl = trainControl(method = "cv", number = 5)
+    )
     
-    # Ensure factors have at least 2 levels to avoid contrasts error
-    if(length(unique(df$district)) < 2 || 
-       length(unique(df$building_type)) < 2 || 
-       length(unique(df$floor)) < 2) {
-      # Use simplified model with only numeric predictors
-      tryCatch({
-        lm(price_per_m2 ~ land_area_m2, data = df)
-      }, error = function(e) {
-        NULL
-      })
-    } else {
-      # Full model if sufficient factor levels
-      tryCatch({
-        lm(price_per_m2 ~ land_area_m2 + district + building_type + floor, data = df)
-      }, error = function(e) {
-        # Fallback to simple model
-        tryCatch({
-          lm(price_per_m2 ~ land_area_m2, data = df)
-        }, error = function(e2) {
-          NULL
-        })
-      })
-    }
+    return(stack_model)
+    
+  }, error = function(e) {
+    return(NULL)
   })
+})
+
   
   output$model_summary <- renderPrint({
-    model <- rental_model()
-    status <- data_status()
-    if(is.null(model)) {
-      if(!status$sufficient_for_prediction) {
-        cat("模型無法建立：資料不足（需要至少10筆記錄、2個行政區、2種建物型態）")
-        cat("\n目前資料：", status$total_records, "筆記錄，", 
-            status$districts_count, "個行政區，", 
-            status$building_types_count, "種建物型態")
-      } else {
-        cat("模型無法建立：其他錯誤")
-      }
+  model <- rental_model()
+  status <- data_status()
+  
+  if (is.null(model)) {
+    if (!status$sufficient_for_prediction) {
+      cat("模型無法建立：資料不足（需要至少10筆記錄、2個行政區、2種建物型態）")
+      cat("\n目前資料：", status$total_records, "筆記錄，", 
+          status$districts_count, "個行政區，", 
+          status$building_types_count, "種建物型態")
+    } else {
+      cat("模型無法建立：其他錯誤")
+    }
+  } else {
+    if ("caretStack" %in% class(model)) {
+      print(model)
     } else {
       summary(model)
     }
-  })
+  }
+})
+
   
   # === 價格預測頁面 ===
   
