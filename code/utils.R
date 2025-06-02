@@ -18,7 +18,7 @@ install_and_load <- function(packages) {
 }
 
 # Core packages
-core_packages <- c("shiny", "shinydashboard", "ggplot2", "dplyr", "plotly", "DT")
+core_packages <- c("shiny", "shinydashboard", "ggplot2", "dplyr", "plotly", "DT", "caretEnsemble")
 install_and_load(core_packages)
 
 install_optional_package <- function(pkg) {

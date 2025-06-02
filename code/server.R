@@ -12,7 +12,7 @@ server <- function(input, output, session) {
   
   # 載入並處理資料
   data <- reactive({
-    df <- read.csv("datasets.csv", fileEncoding = "UTF-8-BOM")
+    df <- read.csv("data/all_cleaned.csv", fileEncoding = "UTF-8-BOM")
     preprocess(df)
   })
   
@@ -241,7 +241,8 @@ server <- function(input, output, session) {
     df <- filtered_data() %>%
       group_by(floor) %>%
       summarise(avg_price = mean(price_per_ping, na.rm = TRUE), count = n(), .groups = 'drop') %>%
-      filter(count >= 3)
+      filter(count >= 3) %>%
+      filter(!(floor %in% c("全", "見其他登記事項")))
     
     p <- ggplot(df, aes(x = reorder(floor, avg_price), y = avg_price)) +
       geom_col(fill = "#9b59b6", alpha = 0.8) +
