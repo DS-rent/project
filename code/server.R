@@ -142,8 +142,8 @@ server <- function(input, output, session) {
   
   output$price_trend <- renderValueBox({
     df <- filtered_data()
-    if(nrow(df) > 1 && !all(is.na(df$rent_date))) {
-      trend <- ifelse(cor(as.numeric(df$rent_date), df$price_per_m2, use = "complete.obs") > 0, "上升", "下降")
+    if(nrow(df) > 1 && !all(is.na(df$converted_date))) {
+      trend <- ifelse(cor(as.numeric(df$converted_date), df$price_per_m2, use = "complete.obs") > 0, "上升", "下降")
       color <- ifelse(trend == "上升", "red", "green")
     } else {
       trend <- "無趨勢"
@@ -257,11 +257,13 @@ server <- function(input, output, session) {
   output$time_trend <- renderPlotly({
     df <- filtered_data()
     
-    if(lubridate_available && !all(is.na(df$rent_date))) {
+    if(lubridate_available && !all(is.na(df$converted_date))) {
       df <- df %>%
-        mutate(year_month = format(rent_date, "%Y-%m")) %>%
+        mutate(year_month = format(converted_date, "%Y-%m"),
+               year_month_date = as.Date(paste0(year_month, "-01")))%>%
         group_by(year_month) %>%
-        summarise(avg_price = mean(price_per_ping, na.rm = TRUE), .groups = 'drop')
+        summarise(avg_price = mean(price_per_ping, na.rm = TRUE), .groups = 'drop') %>%
+        arrange(year_month)
       
       p <- ggplot(df, aes(x = year_month, y = avg_price)) +
         geom_line(group = 1, color = "#e74c3c", linewidth = 1) +
@@ -295,8 +297,8 @@ server <- function(input, output, session) {
 
   # 特徵前處理（選用較穩定欄位）
   df <- df %>% 
-    select(price_per_m2, land_area_m2, district, building_type, floor) %>% 
-    filter(!is.na(price_per_m2), !is.na(land_area_m2), !is.na(district), 
+    select(price_per_ping, land_area_ping, district, building_type, floor) %>% 
+    filter(!is.na(price_per_ping), !is.na(land_area_ping), !is.na(district), 
            !is.na(building_type), !is.na(floor))
   
   # 訓練參數
@@ -596,11 +598,11 @@ server <- function(input, output, session) {
   
   output$raw_data_table <- renderDT({
     df <- filtered_data() %>%
-      select(district, land_area_ping, rent_date, floor, building_type, price_per_ping) %>%
+      select(district, land_area_ping, converted_date, floor, building_type, price_per_ping) %>%
       rename(
         行政區 = district,
         `土地面積 (坪)` = land_area_ping,
-        租賃日期 = rent_date,
+        租賃日期 = converted_date,
         樓層 = floor,
         建物型態 = building_type,
         `單價 (元/坪)` = price_per_ping
