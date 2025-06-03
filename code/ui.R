@@ -60,6 +60,16 @@ sidebar <- dashboardSidebar(
     step = 3,
     width = "90%"
   ),
+
+  sliderInput(
+    "year_range",
+    "年分範圍:",
+    min = 2018,
+    max = 2024,
+    value = c(2018, 2024),
+    step = 1,
+    width = "90%"
+  ),
   
   br(),
   actionButton(

@@ -28,6 +28,10 @@ server <- function(input, output, session) {
     df <- df %>%
       filter(land_area_ping >= input$area_range[1] & land_area_ping <= input$area_range[2])
     
+    # 年份時間篩選 (使用西元紀年)
+    df <- df %>%
+      filter(lubridate::year(converted_date) >= input$year_range[1] & lubridate::year(converted_date) <= input$year_range[2])
+
     # 行政區篩選
     if (!is.null(input$district_filter) && length(input$district_filter) > 0) {
       df <- df %>% filter(district %in% input$district_filter)
