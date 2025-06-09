@@ -171,11 +171,11 @@ server <- function(input, output, session) {
     df <- filtered_data()
 
     p <- ggplot(df, aes(x = price_per_ping)) +
-      geom_histogram(binwidth = 165, fill = "#3498db", alpha = 0.7, color = "white") +
+      geom_histogram(binwidth = 165, fill = "#3498db", alpha = 0.7, color = "white",aes(text = paste0("租金 : ",..x..,"(元/坪)\n", "件數 : ",..count..,"件"))) +
       labs(title = "租金單價分布", x = "租金 (元/坪)", y = "物件數量") +
       theme_minimal()
 
-    ggplotly(p) %>% config(displayModeBar = FALSE)
+    ggplotly(p, tooltip = "text") %>% config(displayModeBar = FALSE)
   })
 
   # 各行政區平均租金
@@ -186,12 +186,12 @@ server <- function(input, output, session) {
       arrange(desc(avg_price))
 
     p <- ggplot(df, aes(x = reorder(district, avg_price), y = avg_price)) +
-      geom_col(fill = "#2ecc71", alpha = 0.8) +
+      geom_col(fill = "#2ecc71", alpha = 0.8, aes(text = paste0("行政區 : ",district,"\n","平均租金 : ",round(avg_price, 1),"(元/坪)"))) +
       coord_flip() +
       labs(title = "各行政區平均租金", x = "行政區", y = "平均租金 (元/坪)") +
       theme_minimal()
 
-    ggplotly(p) %>% config(displayModeBar = FALSE)
+    ggplotly(p, tooltip = "text") %>% config(displayModeBar = FALSE)
   })
 
   # 建物型態分析
@@ -205,12 +205,12 @@ server <- function(input, output, session) {
       )
 
     p <- ggplot(df, aes(x = reorder(building_type, count), y = count)) +
-      geom_col(fill = "#f39c12", alpha = 0.8) +
+      geom_col(fill = "#f39c12", alpha = 0.8, aes(text = paste0("建物型態 : ",building_type,"\n", "件數 : ",count,"件"))) +
       coord_flip() +
       labs(title = "建物型態統計", x = "建物型態", y = "物件數量") +
       theme_minimal()
 
-    ggplotly(p) %>% config(displayModeBar = FALSE)
+    ggplotly(p,tooltip = "text") %>% config(displayModeBar = FALSE)
   })
 
   # 面積vs租金散點圖
@@ -219,14 +219,14 @@ server <- function(input, output, session) {
 
     p <- suppressMessages({
       ggplot(df, aes(x = land_area_ping, y = price_per_ping, color = district)) +
-        geom_point(alpha = 0.6) +
+        geom_point(alpha = 0.6, aes(text = paste0("行政區 : ",district,"\n","坪數 : ",round(land_area_ping, 1),"坪\n", "租金 : ",round(price_per_ping, 1),"(元/坪)" ))) +
         geom_smooth(method = "lm", se = FALSE, color = "red") +
         labs(title = "面積 vs 租金關係", x = "土地面積 (坪)", y = "租金 (元/坪)") +
         theme_minimal() +
         theme(legend.position = "none")
     })
 
-    ggplotly(p) %>% config(displayModeBar = FALSE)
+    ggplotly(p,tooltip = "text") %>% config(displayModeBar = FALSE)
   })
 
   # === 詳細分析頁面 ===
