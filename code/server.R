@@ -1,18 +1,30 @@
-source("utils.R")
+library(shiny)
+library(dplyr)
 library(caret)
 library(caretEnsemble)
-library(glmnet)
-# Check package availability
-leaflet_available <- "leaflet" %in% rownames(installed.packages()) &&
-  require("leaflet", character.only = TRUE, quietly = TRUE)
-lubridate_available <- "lubridate" %in% rownames(installed.packages()) &&
-  require("lubridate", character.only = TRUE, quietly = TRUE)
+library(ggplot2)
+library(shinyjs)
+library(DT)
+library(plotly)
+library(leaflet)
+library(lubridate)
+
+source("utils.R")
 
 server <- function(input, output, session) {
-  # 載入並處理資料
-  data <- reactive({
+  shinyjs::useShinyjs()
+
+  # --- Centralized Reactive Values ---
+  data <- reactiveVal()
+  trained_model <- reactiveVal(NULL)
+  prediction_result <- reactiveVal(NULL)
+  predict_after_train <- reactiveVal(FALSE)
+
+  # --- Initial Data Load ---
+  observe({
     df <- read.csv("data/all_cleaned.csv", fileEncoding = "UTF-8-BOM")
-    preprocess(df)
+    processed_df <- preprocess(df)
+    data(processed_df)
   })
 
   # 篩選後的資料
@@ -217,14 +229,18 @@ server <- function(input, output, session) {
   output$area_price_scatter <- renderPlotly({
     df <- filtered_data()
 
-    p <- suppressMessages({
-      ggplot(df, aes(x = land_area_ping, y = price_per_ping, color = district)) +
-        geom_point(alpha = 0.6) +
-        geom_smooth(method = "lm", se = FALSE, color = "red") +
-        labs(title = "面積 vs 租金關係", x = "土地面積 (坪)", y = "租金 (元/坪)") +
-        theme_minimal() +
-        theme(legend.position = "none")
-    })
+    # Base plot without color aesthetic
+    p <- ggplot(df, aes(x = land_area_ping, y = price_per_ping)) +
+      # Apply color aesthetic only to the points
+      geom_point(alpha = 0.6, aes(color = district)) +
+      labs(title = "面積 vs 租金關係", x = "土地面積 (坪)", y = "租金 (元/坪)") +
+      theme_minimal() +
+      theme(legend.position = "none")
+
+    # Conditionally add a single smoothing line for the entire dataset
+    if (nrow(df) > 1) {
+      p <- p + geom_smooth(method = "lm", se = FALSE, aes(group = 1), color = "red")
+    }
 
     ggplotly(p) %>% config(displayModeBar = FALSE)
   })
@@ -265,7 +281,7 @@ server <- function(input, output, session) {
   output$time_trend <- renderPlotly({
     df <- filtered_data()
 
-    if (lubridate_available && !all(is.na(df$converted_date))) {
+    if (!all(is.na(df$converted_date))) {
       df <- df %>%
         mutate(
           year_month = format(converted_date, "%Y-%m"),
@@ -298,187 +314,346 @@ server <- function(input, output, session) {
     ggplotly(p) %>% config(displayModeBar = FALSE)
   })
 
-  # 迴歸模型
-  rental_model <- reactive({
+  # --- Model Training ---
+  observeEvent(input$retrain_model_analysis, {
     df <- filtered_data()
-
-    # 基本資料條件檢查
-    if (nrow(df) < 10) {
-      return(NULL)
+    
+    # Guard against insufficient data
+    status <- data_status()
+    if (!status$sufficient_for_prediction) {
+      trained_model(list(model = NULL, error = "資料不足，無法訓練模型。請調整篩選條件。"))
+      return()
     }
 
-    # 特徵前處理（選用較穩定欄位）
-    df <- df %>%
-      select(price_per_ping, land_area_ping, district, building_type, floor) %>%
-      filter(
-        !is.na(price_per_ping), !is.na(land_area_ping), !is.na(district),
-        !is.na(building_type), !is.na(floor)
+    id <- showNotification("模型訓練中，請稍候...", duration = NULL, type = "message")
+    on.exit(removeNotification(id))
+
+    # --- Dynamic Formula Generation ---
+    removed_vars <- c()
+    base_formula <- "price_per_ping ~ land_area_ping"
+    
+    if (length(unique(df$district)) > 1) {
+      base_formula <- paste(base_formula, "+ district")
+    } else {
+      removed_vars <- c(removed_vars, "district")
+    }
+    
+    if (length(unique(df$building_type)) > 1) {
+      base_formula <- paste(base_formula, "+ building_type")
+    } else {
+      removed_vars <- c(removed_vars, "building_type")
+    }
+    
+    if (length(unique(df$floor)) > 1) {
+      base_formula <- paste(base_formula, "+ floor")
+    } else {
+      removed_vars <- c(removed_vars, "floor")
+    }
+    
+    final_formula <- as.formula(base_formula)
+    
+    df_model <- df %>%
+      select(any_of(c("price_per_ping", "land_area_ping", "district", "building_type", "floor"))) %>%
+      na.omit()
+
+    ctrl <- trainControl(method = "cv", number = 5, savePredictions = "final", classProbs = FALSE, verboseIter = FALSE, allowParallel = TRUE)
+
+    tryCatch({
+      model <- caretStack(
+        caretList(final_formula, data = df_model, trControl = ctrl, methodList = c("lm", "rf", "knn")),
+        method = "glmnet",
+        trControl = trainControl(method = "cv", number = 5, savePredictions = "final")
       )
-
-    # 訓練參數
-    ctrl <- trainControl(
-      method = "cv",
-      number = 5,
-      savePredictions = "final",
-      classProbs = FALSE,
-      verboseIter = FALSE
-    )
-
-    tryCatch(
-      {
-        # Base learners：線性回歸 + 隨機森林 + k近鄰
-        models <- caretList(
-          price_per_ping ~ land_area_ping + district + building_type + floor,
-          data = df,
-          trControl = ctrl,
-          methodList = c("lm", "rf", "knn")
-        )
-
-        # 使用 glmnet（彈性正則化）作為 meta learner
-        stack_model <- caretStack(
-          models,
-          method = "glmnet",
-          trControl = trainControl(method = "cv", number = 5)
-        )
-
-        return(stack_model)
-      },
-      error = function(e) {
-        return(NULL)
-      }
-    )
+      trained_model(list(model = model, formula = final_formula, removed_vars = removed_vars, error = NULL))
+    }, error = function(e) {
+      trained_model(list(model = NULL, formula = final_formula, removed_vars = removed_vars, error = e$message))
+    })
   })
 
+  output$model_status_text <- renderUI({
+    model_obj <- trained_model()
+    req(model_obj) # Wait until the model object exists
 
-  output$model_summary <- renderPrint({
-    model <- rental_model()
-    status <- data_status()
-
-    if (is.null(model)) {
-      if (!status$sufficient_for_prediction) {
-        cat("模型無法建立：資料不足（需要至少10筆記錄、2個行政區、2種建物型態）")
-        cat(
-          "\n目前資料：", status$total_records, "筆記錄，",
-          status$districts_count, "個行政區，",
-          status$building_types_count, "種建物型態"
-        )
+    if (!is.null(model_obj$error)) {
+      tags$div(class = "alert alert-danger", icon("times-circle"), strong("模型狀態:"), model_obj$error)
+    } else if (!is.null(model_obj$model)) {
+      if (length(model_obj$removed_vars) > 0) {
+        tags$div(class = "alert alert-warning", icon("exclamation-triangle"), strong("模型已訓練 (已適應):"), 
+                 paste("因資料變異性不足，已自動排除變數:", paste(model_obj$removed_vars, collapse = ", ")))
       } else {
-        cat("模型無法建立：其他錯誤")
+        tags$div(class = "alert alert-success", icon("check-circle"), strong("模型已訓練"), "所有變數皆已納入模型。")
       }
     } else {
-      if ("caretStack" %in% class(model)) {
-        print(model)
-      } else {
-        summary(model)
-      }
+      tags$div(class = "alert alert-info", icon("info-circle"), "模型尚未訓練。請點擊「更新模型」按鈕。")
     }
   })
 
+  output$model_summary <- renderPrint({
+    model_obj <- trained_model()
+    req(model_obj, model_obj$model) # Guard
+    
+    cat("--- 模型配方 ---\n")
+    print(model_obj$formula)
+    cat("\n--- 模型摘要 ---\n")
+    print(model_obj$model)
+  })
 
   # === 價格預測頁面 ===
 
-  predicted_price <- eventReactive(input$predict_btn, {
-    model <- rental_model()
-    status <- data_status()
+  # Helper function for prediction logic
+  run_prediction <- function() {
+    model_obj <- trained_model()
+    req(model_obj, model_obj$model)
 
-    if (is.null(model)) {
-      if (!status$sufficient_for_prediction) {
-        return("資料不足：請調整篩選條件以獲得更多資料")
-      }
-      return("無法預測：模型建立失敗")
-    }
-
-    # 檢查輸入是否在可用選項中
+    model <- model_obj$model
+    
+    # Input validation
     df <- filtered_data()
     if (!(input$pred_district %in% df$district)) {
-      return("所選行政區在目前篩選條件下無資料")
+      prediction_result("預測失敗: 所選行政區在目前篩選條件下無資料。")
+      return()
     }
-
     if (!(input$pred_building_type %in% df$building_type)) {
-      return("所選建物型態在目前篩選條件下無資料")
+      prediction_result("預測失敗: 所選建物型態在目前篩選條件下無資料。")
+      return()
     }
 
-    tryCatch(
-      {
-        new_data <- data.frame(
-          land_area_ping = input$pred_area,
-          district = input$pred_district,
-          building_type = input$pred_building_type,
-          floor = input$pred_floor
-        )
-
-        prediction <- predict(model, new_data)
-        round(prediction, 0)
-      },
-      error = function(e) {
-        paste("預測失敗：", e$message)
+    tryCatch({
+      new_data <- data.frame(
+        land_area_ping = input$pred_area,
+        district = input$pred_district,
+        building_type = input$pred_building_type,
+        floor = input$pred_floor
+      )
+      
+      for (col in c("district", "building_type", "floor")) {
+        if (col %in% names(model$model$xlevels)) {
+          new_data[[col]] <- factor(new_data[[col]], levels = model$model$xlevels[[col]])
+        }
       }
-    )
+
+      prediction <- predict(model, new_data)
+      prediction_result(paste(round(prediction, 0), "元/坪"))
+    }, error = function(e) {
+      prediction_result(paste("預測失敗:", e$message))
+    })
+  }
+
+  # Observer for the predict button
+  observeEvent(input$predict_btn, {
+    model_obj <- trained_model()
+    if (is.null(model_obj) || is.null(model_obj$model)) {
+      predict_after_train(TRUE)
+      prediction_result("模型尚未訓練，系統將為您自動訓練後預測...")
+      shinyjs::click("retrain_model_analysis")
+    } else {
+      run_prediction()
+    }
+  })
+
+  # Observer to run prediction after auto-training
+  observeEvent(trained_model(), {
+    if (predict_after_train()) {
+      run_prediction()
+      predict_after_train(FALSE) # Reset the trigger
+    }
   })
 
   output$predicted_price <- renderText({
-    result <- predicted_price()
-    if (is.character(result)) {
-      result
-    } else {
-      paste(result, "元/坪")
-    }
+    prediction_result()
   })
 
   output$model_performance <- renderPrint({
-    model <- rental_model()
-    status <- data_status()
-
-    if (is.null(model)) {
-      if (!status$sufficient_for_prediction) {
-        cat("模型無法建立：資料不足\n")
-        cat("需要：至少10筆記錄、2個行政區、2種建物型態\n")
-        cat(
-          "目前：", status$total_records, "筆記錄，",
-          status$districts_count, "個行政區，",
-          status$building_types_count, "種建物型態"
-        )
-      } else {
-        cat("模型無法建立：其他錯誤")
+    model_obj <- trained_model()
+    req(model_obj, model_obj$model)
+    
+    model <- model_obj$model
+    
+    tryCatch({
+      # caretStack models have a different structure
+      if (!is.null(model$ens_model) && !is.null(model$ens_model$finalModel)) {
+        # Get predictions from the ensemble model
+        ensemble_pred <- model$ens_model$pred
+        
+        if (!is.null(ensemble_pred) && "pred" %in% names(ensemble_pred)) {
+          actuals <- ensemble_pred$obs
+          predictions <- ensemble_pred$pred
+          
+          rmse <- sqrt(mean((actuals - predictions)^2))
+          rsquared <- cor(actuals, predictions)^2
+          mae <- mean(abs(actuals - predictions))
+          
+          cat("=== 整合模型效能 (Ensemble Model) ===\n")
+          cat("RMSE (均方根誤差):", round(rmse, 2), "元/坪\n")
+          cat("MAE (平均絕對誤差):", round(mae, 2), "元/坪\n")
+          cat("R-squared (決定係數):", round(rsquared, 3), "\n")
+          cat("\n")
+        }
       }
-    } else {
-      cat("R-squared:", round(summary(model)$r.squared, 3), "\n")
-      cat("Adjusted R-squared:", round(summary(model)$adj.r.squared, 3), "\n")
-      cat("RMSE:", round(sqrt(mean(model$residuals^2)), 2), "\n")
-      cat("樣本數:", nrow(model$model), "\n")
-      cat("模型變數:", paste(names(model$coefficients), collapse = ", "))
-    }
+      
+      # Show individual model performances
+      if (!is.null(model$models)) {
+        cat("=== 基礎模型效能 ===\n")
+        for (i in seq_along(model$models)) {
+          model_name <- names(model$models)[i]
+          base_model <- model$models[[i]]
+          
+          cat("\n", toupper(model_name), "模型:\n")
+          
+          # Get the best result
+          if (!is.null(base_model$results)) {
+            best_result <- base_model$results[which.min(base_model$results$RMSE), ]
+            if (nrow(best_result) > 0) {
+              cat("  最佳 RMSE:", round(best_result$RMSE[1], 2), "元/坪\n")
+              if ("Rsquared" %in% names(best_result)) {
+                cat("  最佳 R-squared:", round(best_result$Rsquared[1], 3), "\n")
+              }
+            }
+          }
+        }
+      }
+      
+    }, error = function(e) {
+      cat("模型效能資料尚未完全產生。\n")
+      cat("請確保模型已完成訓練。\n")
+    })
   })
 
   output$prediction_accuracy_plot <- renderPlotly({
-    model <- rental_model()
-
-    if (is.null(model)) {
-      status <- data_status()
-      message <- if (!status$sufficient_for_prediction) {
-        paste("資料不足\n需要更多資料建立模型\n目前：", status$total_records, "筆記錄")
-      } else {
-        "模型無法建立"
+    model_obj <- trained_model()
+    req(model_obj, model_obj$model)
+    
+    model <- model_obj$model
+    
+    tryCatch({
+      # Extract predictions from the ensemble model
+      predictions_df <- NULL
+      
+      # First try to get ensemble predictions
+      if (!is.null(model$ens_model) && !is.null(model$ens_model$pred)) {
+        predictions_df <- model$ens_model$pred
       }
-
+      
+      # If no ensemble predictions, try to get from individual models
+      if (is.null(predictions_df) && !is.null(model$models)) {
+        # Collect predictions from all base models
+        all_preds <- list()
+        
+        for (i in seq_along(model$models)) {
+          base_model <- model$models[[i]]
+          if (!is.null(base_model$pred)) {
+            model_name <- names(model$models)[i]
+            pred_df <- base_model$pred
+            pred_df$model <- model_name
+            all_preds[[i]] <- pred_df
+          }
+        }
+        
+        if (length(all_preds) > 0) {
+          predictions_df <- do.call(rbind, all_preds)
+        }
+      }
+      
+      if (!is.null(predictions_df) && nrow(predictions_df) > 0) {
+        # Create the plot
+        if ("model" %in% names(predictions_df)) {
+          # Multiple models - show all
+          p <- ggplot(predictions_df, aes(x = obs, y = pred, color = model)) +
+            geom_point(alpha = 0.6) +
+            geom_abline(intercept = 0, slope = 1, color = "black", linetype = "dashed", linewidth = 1) +
+            facet_wrap(~model) +
+            labs(
+              title = "預測 vs 實際值 (各模型比較)", 
+              x = "實際租金 (元/坪)", 
+              y = "預測租金 (元/坪)",
+              color = "模型"
+            ) +
+            theme_minimal() +
+            theme(legend.position = "bottom")
+        } else {
+          # Single model or ensemble
+          # Calculate R-squared first
+          rsq <- cor(predictions_df$obs, predictions_df$pred)^2
+          
+          # Determine annotation position based on data distribution
+          x_range <- range(predictions_df$obs)
+          y_range <- range(predictions_df$pred)
+          
+          # Position R² in upper-left corner with proper padding
+          annotation_x <- x_range[1] + (x_range[2] - x_range[1]) * 0.05
+          annotation_y <- y_range[2] - (y_range[2] - y_range[1]) * 0.05
+          
+          p <- ggplot(predictions_df, aes(x = obs, y = pred)) +
+            geom_point(alpha = 0.6, color = "#3498db", size = 2) +
+            geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed", linewidth = 1) +
+            geom_smooth(method = "lm", se = TRUE, color = "blue", alpha = 0.2, linewidth = 1) +
+            labs(
+              x = "實際租金 (元/坪)", 
+              y = "預測租金 (元/坪)"
+            ) +
+            theme_minimal() +
+            theme(
+              plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+              axis.title = element_text(size = 12)
+            ) +
+            # Add R-squared annotation with background box for better readability
+            annotate("rect", 
+                    xmin = annotation_x - (x_range[2] - x_range[1]) * 0.01,
+                    xmax = annotation_x + (x_range[2] - x_range[1]) * 0.12,
+                    ymin = annotation_y - (y_range[2] - y_range[1]) * 0.08,
+                    ymax = annotation_y + (y_range[2] - y_range[1]) * 0.02,
+                    fill = "white", alpha = 0.8) +
+            annotate("text", 
+                    x = annotation_x, 
+                    y = annotation_y,
+                    label = paste("R² =", round(rsq, 3)),
+                    hjust = 0,
+                    vjust = 1,
+                    size = 5,
+                    color = "darkblue",
+                    fontface = "bold")
+        }
+        
+        # Convert to plotly with custom title to avoid duplication
+        ggplotly(p, tooltip = c("x", "y")) %>% 
+          config(displayModeBar = FALSE) %>%
+          layout(
+            title = list(
+              text = "預測 vs 實際值",
+              font = list(size = 16)
+            ),
+            height = 400,
+            margin = list(t = 50)
+          )
+        
+      } else {
+        # No prediction data available
+        showNotification("請先點擊「更新模型」訓練模型", type = "warning", duration = 3)
+        
+        p <- ggplot() +
+          annotate("text", x = 0.5, y = 0.5, 
+                  label = "請先訓練模型以查看預測準確度\n\n點擊「更新模型」按鈕開始訓練", 
+                  size = 6, hjust = 0.5, color = "#666666") +
+          theme_void()
+        
+        ggplotly(p) %>% 
+          config(displayModeBar = FALSE) %>%
+          layout(height = 400)
+      }
+      
+    }, error = function(e) {
+      showNotification(paste("繪圖錯誤:", e$message), type = "error", duration = 5)
+      
       p <- ggplot() +
-        annotate("text", x = 0.5, y = 0.5, label = message, size = 4) +
+        annotate("text", x = 0.5, y = 0.5, 
+                label = "無法顯示預測圖表\n請檢查模型訓練狀態", 
+                size = 5, hjust = 0.5, color = "#cc0000") +
         theme_void()
-      return(ggplotly(p) %>% config(displayModeBar = FALSE))
-    }
-
-    df <- data.frame(
-      actual = model$model$price_per_ping,
-      predicted = fitted(model)
-    )
-
-    p <- ggplot(df, aes(x = actual, y = predicted)) +
-      geom_point(alpha = 0.6, color = "#3498db") +
-      geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-      labs(title = "預測 vs 實際值", x = "實際租金", y = "預測租金") +
-      theme_minimal()
-
-    ggplotly(p) %>% config(displayModeBar = FALSE)
+      
+      ggplotly(p) %>% 
+        config(displayModeBar = FALSE) %>%
+        layout(height = 400)
+    })
   })
 
   # === 地區推薦頁面 ===

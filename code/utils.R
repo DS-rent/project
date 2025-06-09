@@ -18,25 +18,8 @@ install_and_load <- function(packages) {
 }
 
 # Core packages
-core_packages <- c("shiny", "shinydashboard", "ggplot2", "dplyr", "plotly", "DT", "caretEnsemble")
+core_packages <- c("shiny", "shinydashboard", "ggplot2", "dplyr", "plotly", "DT", "caretEnsemble", "shinyjs", "leaflet", "lubridate")
 install_and_load(core_packages)
-
-install_optional_package <- function(pkg) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    tryCatch(
-      {
-        suppressWarnings(install.packages(pkg, repos = "https://cran.rstudio.com/", dependencies = TRUE, quiet = TRUE))
-        suppressMessages(require(pkg, character.only = TRUE, quietly = TRUE))
-      },
-      error = function(e) {
-
-      }
-    )
-  }
-}
-
-install_optional_package("leaflet")
-install_optional_package("lubridate")
 
 preprocess <- function(df) {
   df <- df %>%
@@ -48,6 +31,10 @@ preprocess <- function(df) {
       building_type = 建物型態,
       price_per_m2 = 單價元平方公尺
     )
+  
+  # Proactively filter for valid date formats to prevent coercion warnings
+  df <- df %>%
+    filter(grepl("^[0-9]{7}$", rent_date))
 
   # 處理日期格式
   df <- df %>%
@@ -59,7 +46,9 @@ preprocess <- function(df) {
         ), # 月日部分
         format = "%Y%m%d"
       )
-    )
+    ) %>%
+    # Filter out rows where date conversion resulted in NA
+    filter(!is.na(converted_date))
 
   # df$converted_date <- tryCatch({
   #   as.Date(as.character(df$converted_date), format = "%Y%m%d")
