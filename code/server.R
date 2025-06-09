@@ -350,10 +350,16 @@ server <- function(input, output, session) {
       removed_vars <- c(removed_vars, "floor")
     }
     
+    if (length(unique(df$converted_date)) > 1) {
+      base_formula <- paste(base_formula, "+ converted_date")
+    } else {
+      removed_vars <- c(removed_vars, "converted_date")
+    }
+
     final_formula <- as.formula(base_formula)
     
     df_model <- df %>%
-      select(any_of(c("price_per_ping", "land_area_ping", "district", "building_type", "floor"))) %>%
+      select(any_of(c("price_per_ping", "land_area_ping", "district", "building_type", "floor", "converted_date"))) %>%
       na.omit()
 
     ctrl <- trainControl(method = "cv", number = 5, savePredictions = "final", classProbs = FALSE, verboseIter = FALSE, allowParallel = TRUE)
@@ -673,7 +679,9 @@ server <- function(input, output, session) {
 
     # 篩選符合預算的物件
     suitable <- df %>%
-      filter(estimated_monthly_rent <= input$budget)
+      filter(estimated_monthly_rent <= input$budget) %>%
+      filter(lubridate::year(converted_date) == 2024) %>%
+      filter(land_area_ping <= input$desired_area)
 
     if (nrow(suitable) == 0) {
       return(data.frame(
